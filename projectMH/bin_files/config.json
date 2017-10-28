@@ -1,0 +1,18 @@
+{
+	"SamplingHz": 128,
+	"m": 2,
+	"r": 0.15,
+	"Seconds": 9,
+	"N": 128,
+	"shift": 1,
+	"Executions": 30,
+	"IterationsMax": 100,
+	"NumberStars": 30,
+	"MinError": 0,
+	"MaxParalelism": 8,
+	"LALVFileName": "SegYo-LALV.db",
+	"LAHVFileName": "SegYo-LAHV.db",
+	"HALVFileName": "SegYo-HALV.db",
+	"HAHVFileName": "SegYo-HAHV.db",
+	"MaxLinesOrNegative": -1
+}

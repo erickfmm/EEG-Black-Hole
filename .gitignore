@@ -1,0 +1,8 @@
+.vs/*
+/.project
+packages/*
+
+TestResults/*
+
+projectMH/obj/*
+projectMH/bin/*
