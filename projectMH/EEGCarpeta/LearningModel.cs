@@ -1,4 +1,5 @@
 ﻿using Accord.IO;
+using Accord.MachineLearning;
 using Accord.MachineLearning.Performance;
 using Accord.MachineLearning.VectorMachines;
 using Accord.MachineLearning.VectorMachines.Learning;
@@ -209,20 +210,21 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
 
         private Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double> Training(List<double[]> inputsList, List<int> outputsList)
         {
-            var gridsearch = GridSearch<double[], int>.CrossValidate(
+            var gridsearch = new GridSearch<MulticlassSupportVectorMachine<Gaussian>, double[], int>()
+            {
                 // Here we can specify the range of the parameters to be included in the search
-                ranges: new
+                ParameterRanges = new GridSearchRangeCollection()
                 {
-                    Complexity = GridSearch.Values( Math.Pow(2, -10), Math.Pow(2, -8),
+                    new GridSearchRange("Complexity", new double[]{Math.Pow(2, -10), Math.Pow(2, -8),
                         Math.Pow(2, -6), Math.Pow(2, -4), Math.Pow(2, -2), Math.Pow(2, 0), Math.Pow(2, 2),
-                        Math.Pow(2, 4), Math.Pow(2, 6), Math.Pow(2, 8), Math.Pow(2, 10)),
-                    Gamma = GridSearch.Values(Math.Pow(2, -10), Math.Pow(2, -8),
+                        Math.Pow(2, 4), Math.Pow(2, 6), Math.Pow(2, 8), Math.Pow(2, 10)}),
+                    new GridSearchRange("Gamma", new double[]{Math.Pow(2, -10), Math.Pow(2, -8),
                         Math.Pow(2, -6), Math.Pow(2, -4), Math.Pow(2, -2), Math.Pow(2, 0), Math.Pow(2, 2),
-                        Math.Pow(2, 4), Math.Pow(2, 6), Math.Pow(2, 8), Math.Pow(2, 10))
+                        Math.Pow(2, 4), Math.Pow(2, 6), Math.Pow(2, 8), Math.Pow(2, 10)})
                 },
 
                 // Indicate how learning algorithms for the models should be created
-                learner: (p, ss) => new MulticlassSupportVectorLearning<Gaussian>()
+                Learner = (p) => new MulticlassSupportVectorLearning<Gaussian>()
                 {
                     // Configure the learning algorithm to use SMO to train the
                     //  underlying SVMs in each of the binary class subproblems.
@@ -232,18 +234,18 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                         // This estimate can serve as a starting point for a grid search.
                         //UseComplexityHeuristic = true,
                         //UseKernelEstimation = true
-                        Complexity = p.Complexity,
-                        Kernel = new Gaussian(p.Gamma)
+                        Complexity = p["Complexity"],
+                        Kernel = new Gaussian(p["Gamma"])
                     }
                 },
                 // Define how the model should be learned, if needed
-                fit: (teacher, x, y, w) => teacher.Learn(x, y, w),
+                Fit = (teacher, x, y, w) => teacher.Learn(x, y, w),
 
                 // Define how the performance of the models should be measured
-                loss: (actual, expected, m) =>
+                Loss = (actual, expected, m) =>
                 {
                     double totalError = 0;
-                    foreach(var input in _originalInputsList)
+                    foreach (var input in _originalInputsList)
                     {
                         if (!m.Decide(input.Item1).Equals(input.Item2))
                         {
@@ -251,33 +253,21 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                         }
                     }
                     return totalError / (_originalInputsList.Count * 4);
-                },
-                folds: 10
-            );
+                }
+            };
 
             gridsearch.ParallelOptions.MaxDegreeOfParallelism = _paralelism;
 
             Console.WriteLine("y nos ponemos a aprender");
             // Search for the best model parameters
             var result = gridsearch.Learn(inputsList.ToArray(), outputsList.ToArray());
-            Console.WriteLine("Error modelo: "+result.BestModelError);
+            Console.WriteLine("Error modelo: " + result.BestModelError);
 
-            var model = CreateModel(inputsList, outputsList, result.BestParameters.Complexity, result.BestParameters.Gamma);
+            var model = result.BestModel;
 
-            double error = 0;
-            Console.WriteLine("Largo: "+_originalInputsList.Count);
-            foreach (var input in _originalInputsList)
-            {
-                if (!model.Decide(input.Item1).Equals(input.Item2))
-                {
-                    error++;
-                }
-            }
-            error = error / (_originalInputsList.Count * 4);
-            Console.WriteLine("Error real: "+error);
+            double error = result.BestModelError;
 
-
-            return new Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double>(model, error, result.BestParameters.Gamma, result.BestParameters.Complexity);
+            return new Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double>(model, error, result.BestParameters["Gamma"].Value, result.BestParameters["Complexity"].Value);
         }
 
         private MulticlassSupportVectorMachine<Gaussian> CreateModel(List<double[]> inputsList,
