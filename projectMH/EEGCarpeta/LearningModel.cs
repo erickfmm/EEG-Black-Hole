@@ -74,20 +74,37 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             Console.WriteLine("procesado todo, ahora a buscar");
             // Instantiate a new Grid Search algorithm for Kernel Support Vector Machines
             MulticlassSupportVectorMachine<Gaussian> svm = null;// Training(inputsList, outputsList).BestModel;
-            Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double> result = null;// Training(inputsList, outputsList);
+            Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double> result;// Training(inputsList, outputsList);
             var file_all_models = File.AppendText(Path.Combine(_directory, "all_models.txt"));
             var file_all_stars = File.AppendText(Path.Combine(_directory, "all_stars_all_its.txt"));
-            result = Training(inputsList, outputsList);
             Star2[] stars = new Star2[_population];
-            Star2 best = new Star2()
+            Star2 best;
+            try
             {
-                svm = result.Item1.DeepClone(),
-                error = result.Item2,
-                Complexity = result.Item3,
-                Gamma = result.Item4,
-                inputsList = inputsList.DeepClone()
+                result = Training(inputsList, outputsList);
+                best = new Star2()
+                {
+                    svm = result.Item1.DeepClone(),
+                    error = result.Item2,
+                    Complexity = result.Item3,
+                    Gamma = result.Item4,
+                    inputsList = inputsList.DeepClone()
 
-            };
+                };
+            }catch(Exception ex)
+            {
+                Console.WriteLine("Error al entrenar el primero: " + ex.Message + "\nInner: " +ex.InnerException?.Message);
+                best = new Star2()
+                {
+                    svm = null,
+                    error = 1,
+                    Complexity = -1,
+                    Gamma = -1,
+                    inputsList = inputsList.DeepClone()
+
+                };
+            }
+            
             file_all_stars.WriteLine("Model: inicial, Seed: "+ seed+", Error: "+best.error+", Gamma: "+best.Gamma+", C: "+best.Complexity+"\n inputs: "+best.inputsList.ToJsonString(true));
             file_all_stars.Flush();
             //inicialization
@@ -95,10 +112,10 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             {
                 stars[iStar] = new Star2()
                 {
-                    svm = result.Item1.DeepClone(),
-                    error = result.Item2,
-                    Complexity = result.Item3,
-                    Gamma = result.Item4,
+                    svm = best.svm?.DeepClone(),
+                    error = best.error,
+                    Complexity = best.Complexity,
+                    Gamma = best.Gamma,
                     inputsList = inputsList.DeepClone()
                 };
                 try
@@ -108,7 +125,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                         for (int jinput = 0; jinput < stars[iStar].inputsList[iInput].Length; jinput++)
                         {
                             stars[iStar].inputsList[iInput][jinput] = stars[iStar].inputsList[iInput][jinput]
-                                + ((_xrand.NextDouble() * -1) * result.Item2 * stars[iStar].inputsList[iInput][jinput]);
+                                + ((_xrand.NextDouble() * -1) * stars[iStar].error * stars[iStar].inputsList[iInput][jinput]);
                         }
 
                     }
@@ -122,7 +139,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                 }
                 catch(Exception ex)
                 {
-                    Console.WriteLine("Error al inicializar estrella "+iStar+": "+ex.Message);
+                    Console.WriteLine("Error al inicializar estrella "+iStar+": "+ex.Message+"\nInner: "+ex.InnerException?.Message);
                 }
                 
             }
@@ -171,7 +188,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                     }
                     catch(Exception ex)
                     {
-                        Console.WriteLine("Error en it "+i+" al cambiar estrella " + iStar + ": " + ex.Message);
+                        Console.WriteLine("Error en it "+i+" al cambiar estrella " + iStar + ": " + ex.Message+"\n Inner: "+ex.InnerException?.Message);
                         stars[iStar] = prevStar;
                     }
                 }
@@ -186,7 +203,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             }
             file_all_models.Close();
             file_all_stars.Close();
-            WriteFiles(result.Item2, result.Item3, result.Item4, inputsList, outputsList, result.Item1);
+            WriteFiles(best.error, best.Gamma, best.Complexity, inputsList, outputsList, best.svm);
             return svm;
         }
 
@@ -233,7 +250,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                             totalError++;
                         }
                     }
-                    return totalError / (_originalInputsList.Count);
+                    return totalError / (_originalInputsList.Count * 4);
                 },
                 folds: 10
             );
@@ -256,7 +273,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                     error++;
                 }
             }
-            error = error / (_originalInputsList.Count);
+            error = error / (_originalInputsList.Count * 4);
             Console.WriteLine("Error real: "+error);
 
 
@@ -288,7 +305,6 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             // Get the best SVM found during the parameter search
             _svm = svm;
             
-
             Console.WriteLine("error: "+error+", Gamma: "+gamma+", C: "+complexity);
             string outInternalPath = Path.Combine(_directory, "result.txt");
             var file_emotrain = File.CreateText(outInternalPath);
@@ -296,8 +312,15 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             file_emotrain.Close();
 
             string internalPath = Path.Combine(_directory, "emotionmodel.svm");
-            Serializer.Save<MulticlassSupportVectorMachine<Gaussian>>(obj: svm, path: internalPath);
-            Console.WriteLine("guardado");
+            try
+            {
+                Serializer.Save<MulticlassSupportVectorMachine<Gaussian>>(obj: svm, path: internalPath);
+                Console.WriteLine("guardado");
+            }catch(Exception ex)
+            {
+                Console.WriteLine("Error al guardar svm file: "+ex.Message+"\n Inner: "+ex.InnerException?.Message);
+            }
+            
 
             var file_features = File.CreateText(Path.Combine(_directory, "features.json"));
             file_features.WriteLine(inputsList.ToJsonString());
