@@ -4,6 +4,7 @@ using Accord.MachineLearning.Performance;
 using Accord.MachineLearning.VectorMachines;
 using Accord.MachineLearning.VectorMachines.Learning;
 using Accord.Statistics.Kernels;
+using Accord.Math.Optimization.Losses;
 using cl.uv.leikelen.Module.Processing.EEGEmotion2Channels.PreProcessing;
 using System;
 using System.Collections.Generic;
@@ -46,6 +47,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
         public MulticlassSupportVectorMachine<Gaussian> Train(Dictionary<TagType, List<List<double[]>>> allsignalsList)
         {
             int seed = DateTime.Now.Second+ DateTime.Now.Millisecond+ DateTime.Now.Minute;
+            Console.WriteLine("semilla: "+seed);
             _xrand = new Random(seed);
             Console.WriteLine("a entrenar se ha dicho");
             List<double[]> inputsList = new List<double[]>();
@@ -68,15 +70,22 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                     inputsList.Add(featureVector.DeepClone());
                     outputsList.Add(tag.DeepClone().GetHashCode());
                     _originalInputsList.Add(new Tuple<double[], int>(featureVector.DeepClone(), tag.DeepClone().GetHashCode()));
-                    Console.WriteLine(_originalInputsList[i].Item1+","+ _originalInputsList[i].Item2);
+                    //Console.WriteLine(_originalInputsList[i].Item1+","+ _originalInputsList[i].Item2);
                     i = i + 1;
                 }
             }
             Console.WriteLine("procesado todo, ahora a buscar");
+            bool onlyPaper = EEGEmoProc2ChSettings.Instance.OnlyPaper.Value;
+            if (onlyPaper)
+            {
+                var res = TrainingPaper(inputsList, outputsList);
+                WriteFiles(res.Item2, res.Item4, res.Item3, inputsList, outputsList, res.Item1);
+                return res.Item1;
+            }
             // Instantiate a new Grid Search algorithm for Kernel Support Vector Machines
             MulticlassSupportVectorMachine<Gaussian> svm = null;// Training(inputsList, outputsList).BestModel;
             Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double> result;// Training(inputsList, outputsList);
-            var file_all_models = File.AppendText(Path.Combine(_directory, "all_models.txt"));
+            var fileBestByIt = File.AppendText(Path.Combine(_directory, "historial_best_by_it.txt"));
             var file_all_stars = File.AppendText(Path.Combine(_directory, "all_stars_all_its.txt"));
             Star2[] stars = new Star2[_population];
             Star2 best;
@@ -92,7 +101,8 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                     inputsList = inputsList.DeepClone()
 
                 };
-            }catch(Exception ex)
+            }
+            catch (Exception ex)
             {
                 Console.WriteLine("Error al entrenar el primero: " + ex.Message + "\nInner: " +ex.InnerException?.Message);
                 best = new Star2()
@@ -105,7 +115,9 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
 
                 };
             }
-            
+            fileBestByIt.WriteLine("Iteration: Initial model, Seed: " + seed + ", Error: " + best.error + ", Gamma: " + best.Gamma + ", C: " + best.Complexity + "\n inputs: " + best.inputsList.ToJsonString(true));
+            fileBestByIt.Flush();
+
             file_all_stars.WriteLine("Model: inicial, Seed: "+ seed+", Error: "+best.error+", Gamma: "+best.Gamma+", C: "+best.Complexity+"\n inputs: "+best.inputsList.ToJsonString(true));
             file_all_stars.Flush();
             //inicialization
@@ -148,15 +160,21 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             {
                 if (star.error < best.error)
                 {
-                    best = star;
+                    best.svm = star.svm?.DeepClone();
+                    best.error = star.error;
+                    best.Complexity = star.Complexity;
+                    best.Gamma = star.Gamma;
+                    best.inputsList = star.inputsList.DeepClone();
                 }
             }
             //cycle
             for (int i = 0; i < _iterations; i++)
             {
-                
-                file_all_models.WriteLine("Model: "+i+", Seed: "+seed+", Error: "+best.error+", Gamma: "+best.Gamma+", C: "+best.Complexity+"\n inputs: "+best.inputsList.ToJsonString(true));
-                file_all_models.Flush();
+                Console.WriteLine("-----------------------------------------------------------------------------------------------");
+                Console.WriteLine("Iteration: " + i + ", Seed" + seed + ", Error: " + best.error);
+                Console.WriteLine("-----------------------------------------------------------------------------------------------");
+                fileBestByIt.WriteLine("Iteration: "+i+", Seed: "+seed+", Error: "+best.error+", Gamma: "+best.Gamma+", C: "+best.Complexity+"\n inputs: "+best.inputsList.ToJsonString(true));
+                fileBestByIt.Flush();
                 
                 if (best.error <= _minError)
                 {
@@ -167,7 +185,14 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                 //each star
                 for(int iStar = 0; iStar < stars.Length; iStar++)
                 {
-                    Star2 prevStar = stars[iStar];
+                    Star2 prevStar = new Star2()
+                    {
+                        svm = stars[iStar].svm?.DeepClone(),
+                        error = stars[iStar].error,
+                        Complexity = stars[iStar].Complexity,
+                        Gamma = stars[iStar].Gamma,
+                        inputsList = stars[iStar].inputsList.DeepClone()
+                    };
                     try
                     {
                         for (int iInput = 0; iInput < stars[iStar].inputsList.Count; iInput++)
@@ -193,16 +218,38 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                         stars[iStar] = prevStar;
                     }
                 }
-                foreach (var star in stars)
+                for (int iStar = 0; iStar < stars.Length; iStar++)
                 {
-                    if (star.error < best.error)
+                    if (stars[iStar].error < best.error)
                     {
-                        best = star;
+                        best.svm = stars[iStar].svm?.DeepClone();
+                        best.error = stars[iStar].error;
+                        best.Complexity = stars[iStar].Complexity;
+                        best.Gamma = stars[iStar].Gamma;
+                        best.inputsList = stars[iStar].inputsList.DeepClone();
+                    }
+                    double sumError = 0;
+                    for(int jStar = 0; jStar < stars.Length; jStar++)
+                    {
+                        sumError += stars[jStar].error;
+                    }
+                    if((best.error/sumError) < _xrand.NextDouble() * 0.1)
+                    {
+                        Console.WriteLine("Se alcanzó el horizonte de eventos en "+iStar);
+                        for (int iInput = 0; iInput < stars[iStar].inputsList.Count; iInput++)
+                        {
+                            for (int jinput = 0; jinput < stars[iStar].inputsList[iInput].Length; jinput++)
+                            {
+                                stars[iStar].inputsList[iInput][jinput] = stars[iStar].inputsList[iInput][jinput]
+                                    + ((_xrand.NextDouble() * -1) * stars[iStar].error * stars[iStar].inputsList[iInput][jinput]);
+                            }
+
+                        }
                     }
                 }
                 svm = best.svm;
             }
-            file_all_models.Close();
+            fileBestByIt.Close();
             file_all_stars.Close();
             WriteFiles(best.error, best.Gamma, best.Complexity, inputsList, outputsList, best.svm);
             return svm;
@@ -210,7 +257,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
 
         private Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double> Training(List<double[]> inputsList, List<int> outputsList)
         {
-            var gridsearch = new GridSearch<MulticlassSupportVectorMachine<Gaussian>, double[], int>()
+            /*var gridsearch = new GridSearch<MulticlassSupportVectorMachine<Gaussian>, double[], int>()
             {
                 // Here we can specify the range of the parameters to be included in the search
                 ParameterRanges = new GridSearchRangeCollection()
@@ -232,10 +279,10 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                     {
                         // Estimate a suitable guess for the Gaussian kernel's parameters.
                         // This estimate can serve as a starting point for a grid search.
-                        //UseComplexityHeuristic = true,
-                        //UseKernelEstimation = true
-                        Complexity = p["Complexity"],
-                        Kernel = new Gaussian(p["Gamma"])
+                        UseComplexityHeuristic = true,
+                        UseKernelEstimation = true
+                        //Complexity = p["Complexity"],
+                        //Kernel = Gaussian.FromGamma(p["Gamma"])
                     }
                 },
                 // Define how the model should be learned, if needed
@@ -252,9 +299,98 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                             totalError++;
                         }
                     }
-                    return totalError / (_originalInputsList.Count * 4);
+                    return totalError / _originalInputsList.Count;
+                }
+            };*/
+            var Learner = new MulticlassSupportVectorLearning<Gaussian>()
+            {
+                // Configure the learning algorithm to use SMO to train the
+                //  underlying SVMs in each of the binary class subproblems.
+                Learner = (param) => new SequentialMinimalOptimization<Gaussian>()
+                {
+                    // Estimate a suitable guess for the Gaussian kernel's parameters.
+                    // This estimate can serve as a starting point for a grid search.
+                    UseComplexityHeuristic = true,
+                    UseKernelEstimation = true
+                    //Complexity = p["Complexity"],
+                    //Kernel = Gaussian.FromGamma(p["Gamma"])
                 }
             };
+
+            
+
+            Learner.ParallelOptions.MaxDegreeOfParallelism = _paralelism;
+            var model = Learner.Learn(inputsList.ToArray(), outputsList.ToArray());
+
+            Console.WriteLine("y nos ponemos a aprender");
+            // Search for the best model parameters
+            //var result = gridsearch.Learn(inputsList.ToArray(), outputsList.ToArray());
+            //Console.WriteLine("Error modelo: " + result.BestModelError);
+
+            //var model = result.BestModel;
+            double gamma = model.Kernel.Gamma;
+            double error = 0;
+            foreach (var input in _originalInputsList)
+            {
+                if (!model.Decide(input.Item1).Equals(input.Item2))
+                {
+                    error++;
+                }
+            }
+            error = error / _originalInputsList.Count;
+
+            return new Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double>(model, error, gamma, 0);
+        }
+
+        private Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double> TrainingPaper(List<double[]> inputsList, List<int> outputsList)
+        {
+            var gridsearch = GridSearch<double[], int>.CrossValidate(
+                // Here we can specify the range of the parameters to be included in the search
+                ranges: new
+                {
+                    Complexity = GridSearch.Values(Math.Pow(2, -12), Math.Pow(2, -11), Math.Pow(2, -10), Math.Pow(2, -8),
+                        Math.Pow(2, -6), Math.Pow(2, -4), Math.Pow(2, -2), Math.Pow(2, 0), Math.Pow(2, 2),
+                        Math.Pow(2, 4), Math.Pow(2, 6), Math.Pow(2, 8), Math.Pow(2, 10), Math.Pow(2, 11), Math.Pow(2, 12)),
+                    Gamma = GridSearch.Values(Math.Pow(2, -12), Math.Pow(2, -11), Math.Pow(2, -10), Math.Pow(2, -8),
+                        Math.Pow(2, -6), Math.Pow(2, -4), Math.Pow(2, -2), Math.Pow(2, 0), Math.Pow(2, 2),
+                        Math.Pow(2, 4), Math.Pow(2, 6), Math.Pow(2, 8), Math.Pow(2, 10), Math.Pow(2, 11), Math.Pow(2, 12))
+                },
+
+                // Indicate how learning algorithms for the models should be created
+                learner: (p, ss) => new MulticlassSupportVectorLearning<Gaussian>()
+                {
+                    
+                    // Configure the learning algorithm to use SMO to train the
+                    //  underlying SVMs in each of the binary class subproblems.
+                    Learner = (param) => new SequentialMinimalOptimization<Gaussian>()
+                    {
+                        // Estimate a suitable guess for the Gaussian kernel's parameters.
+                        // This estimate can serve as a starting point for a grid search.
+                        //UseComplexityHeuristic = true,
+                        //UseKernelEstimation = true
+                        Complexity = p.Complexity,
+                        Kernel = Gaussian.FromGamma(p.Gamma)
+                    }
+                },
+                // Define how the model should be learned, if needed
+                fit: (teacher, x, y, w) => teacher.Learn(x, y, w),
+
+                // Define how the performance of the models should be measured
+                /*loss: (actual, expected, m) =>
+                {
+                    double totalError = 0;
+                    foreach (var input in _originalInputsList)
+                    {
+                        if (!m.Decide(input.Item1).Equals(input.Item2))
+                        {
+                            totalError++;
+                        }
+                    }
+                    return totalError / _originalInputsList.Count;
+                },*/
+                loss: (actual, expected, m) => new HammingLoss(expected).Loss(actual),
+                folds: 10
+            );
 
             gridsearch.ParallelOptions.MaxDegreeOfParallelism = _paralelism;
 
@@ -263,11 +399,21 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             var result = gridsearch.Learn(inputsList.ToArray(), outputsList.ToArray());
             Console.WriteLine("Error modelo: " + result.BestModelError);
 
-            var model = result.BestModel;
+            var model = CreateModel(inputsList, outputsList, result.BestParameters.Complexity, result.BestParameters.Gamma);
 
-            double error = result.BestModelError;
-
-            return new Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double>(model, error, result.BestParameters["Gamma"].Value, result.BestParameters["Complexity"].Value);
+            double error = 0;
+            Console.WriteLine("Largo: " + _originalInputsList.Count);
+            foreach (var input in _originalInputsList)
+            {
+                if (!model.Decide(input.Item1).Equals(input.Item2))
+                {
+                    error++;
+                }
+            }
+            error = error / (_originalInputsList.Count);
+            Console.WriteLine("Error real: " + error);
+            
+            return new Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double>(model, error, result.BestParameters.Gamma.Value, result.BestParameters.Complexity.Value);
         }
 
         private MulticlassSupportVectorMachine<Gaussian> CreateModel(List<double[]> inputsList,
@@ -283,7 +429,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                     // This estimate can serve as a starting point for a grid search.
 
                     Complexity = complexity,
-                    Kernel = new Gaussian(gamma)
+                    Kernel = Gaussian.FromGamma(gamma)
                 }
             };
             return teacher.Learn(inputsList.ToArray(), outputsList.ToArray());
@@ -298,6 +444,11 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             Console.WriteLine("error: "+error+", Gamma: "+gamma+", C: "+complexity);
             string outInternalPath = Path.Combine(_directory, "result.txt");
             var file_emotrain = File.CreateText(outInternalPath);
+            string executionType = EEGEmoProc2ChSettings.Instance.OnlyPaper.Value ? "Only paper" : "With Metaheuristic";
+            file_emotrain.WriteLine(executionType);
+            file_emotrain.WriteLine("error: " + error + ", Gamma: " + gamma + ", C: " + complexity);
+            file_emotrain.WriteLine("Gamma kernel: " + svm?.Kernel.Gamma + ", Classes: " + svm?.NumberOfClasses);
+            file_emotrain.WriteLine("Inner binary svm models (classes*(classes-1))/2:" + svm?.Count);
             file_emotrain.Flush();
             file_emotrain.Close();
 
@@ -451,6 +602,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             {
                 if (double.IsInfinity(f3[i]) || double.IsNaN(f3[i]))
                 {
+                    Console.WriteLine("F3 es NaN o Infinityyyyyy");
                     f3[i] = f3[i - 1] * (1+(_xrand.Next(-1,1)/10));
                 }
             }
@@ -462,14 +614,14 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             {
                 if (first)
                 {
-                    //c4[i] = BetaBandpass(signalsList[i][1], true);
-                    c4[i] = signalsList[i][1];
+                    c4[i] = BetaBandpass(signalsList[i][1], true);
+                    //c4[i] = signalsList[i][1];
                     first = false;
                 }
                 else
                 {
-                    //c4[i] = BetaBandpass(signalsList[i][1], false);
-                    c4[i] = signalsList[i][1];
+                    c4[i] = BetaBandpass(signalsList[i][1], false);
+                    //c4[i] = signalsList[i][1];
                 }
             }
             //c4 = FilterRLC.LCHP(c4, EEGEmoProc2ChSettings.Instance.SamplingHz.Value, 5, Q);
@@ -478,6 +630,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             {
                 if (double.IsInfinity(c4[i]) || double.IsNaN(c4[i]))
                 {
+                    Console.WriteLine("C4 es NaN o Infinityyyyyy");
                     c4[i] = c4[i - 1] * (1 + (_xrand.Next(-1, 1) / 10));
                 }
             }
@@ -496,24 +649,14 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             List<double> features = new List<double>();
             foreach (var imfF3 in imfsF3)
             {
-                features.Add(SampleEntropy.CalcSampleEntropy(imfF3, N /*(int)(imfF3.Length* percSamples)*/ /*EEGEmoProc2ChSettings.Instance.N.Value*/,
-                    m, r,
+                features.Add(SampleEntropy.CalcSampleEntropy(imfF3, N, m, r,
                     EEGEmoProc2ChSettings.Instance.shift.Value));
             }
 
             foreach (var imfC4 in imfsC4)
             {
-                features.Add(SampleEntropy.CalcSampleEntropy(imfC4, N/*(int)(imfC4.Length * percSamples)*//*EEGEmoProc2ChSettings.Instance.N.Value*/,
-                    m, r,
+                features.Add(SampleEntropy.CalcSampleEntropy(imfC4, N, m, r,
                     EEGEmoProc2ChSettings.Instance.shift.Value));
-            }
-
-            for(int i = 0; i < features.Count; i++)
-            {
-                if (features[i].Equals(0))
-                {
-                    features[i] = _xrand.Next(5)/100;
-                }
             }
             return features;
         }
@@ -522,11 +665,11 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
         {
             if (newFilters || ReferenceEquals(null, _lowFilter) || ReferenceEquals(null, _highFilter))
             {
-                _lowFilter = new FilterButterworth(30f,
+                _lowFilter = new FilterButterworth(45.0f,
                     EEGEmoProc2ChSettings.Instance.SamplingHz,
                     FilterButterworth.PassType.Lowpass, 0.1f);
 
-                _highFilter = new FilterButterworth(12.5f,
+                _highFilter = new FilterButterworth(4.0f,
                     EEGEmoProc2ChSettings.Instance.SamplingHz,
                     FilterButterworth.PassType.Highpass, 0.1f);
             }

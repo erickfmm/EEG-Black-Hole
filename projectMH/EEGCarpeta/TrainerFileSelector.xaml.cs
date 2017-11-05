@@ -58,18 +58,11 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels.View
                                 lastTime = secStart;
                                 lastSessionId = rdr.GetInt32(5);
                             }
-                            if (!rdr.GetInt32(5).Equals(lastSessionId))
-                            {
-                                frame = new List<double[]>();
-                                secStart = rdr.GetInt32(1);
-                                Console.WriteLine("nuevo archivo con segundo: "+secStart+" y el anterior: "+lastTime+", en i: "+i);
-                                lastTime = secStart;
-                            }
                             double[] values = new double[2];
                             bool added = false;
-                            switch (EEGEmoProc2ChSettings.Instance.SamplingHz.Value)
+                            switch (EEGEmoProc2ChSettings.Instance.Decimation.Value)
                             {
-                                case 128:
+                                case 1:
                                     if (rdr.GetInt32(2) % 2 != 0)
                                     {
                                         values[0] = (lastF3 + rdr.GetDouble(3)) / 2;
@@ -77,23 +70,28 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels.View
                                         added = true;
                                     }
                                     break;
-                                case 256:
+                                case 0:
                                     values[0] = rdr.GetDouble(3);
                                     values[1] = rdr.GetDouble(4);
                                     added = true;
                                     break;
                             }
-                            if (rdr.GetInt32(1) < secStart + EEGEmoProc2ChSettings.Instance.secs)
+                            if (i != 0 &&
+                                (i % (EEGEmoProc2ChSettings.Instance.secs * EEGEmoProc2ChSettings.Instance.SamplingHz)) != 0
+                                || rdr.GetInt32(5).Equals(lastSessionId))
                             {
                                 if (added)
                                     frame.Add(values);
                             }
                             else
                             {
+                                int frameLength = frame.Count;
                                 result.Add(frame);
                                 frame = new List<double[]>();
+                                if (added)
+                                    frame.Add(values);
                                 secStart = rdr.GetInt32(1);
-                                Console.WriteLine("frame añadido en el segundo "+secStart+", en i: "+i);
+                                Console.WriteLine("frame añadido en el segundo "+secStart+", en i: "+i+", anterior: "+lastTime+", ultimo session: "+lastSessionId+", cantidad: "+ frameLength);
                             }
                             i++;
                             lastSessionId = rdr.GetInt32(5);
