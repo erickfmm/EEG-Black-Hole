@@ -23,6 +23,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
         private double _minError;
         private int _paralelism;
         private List<Tuple<double[], int>> _originalInputsList;
+        private List<double[]> _originputsList;
 
         public LearningModel(string directory, int iterations, int population, double minError, int paralelism = 1)
         {
@@ -52,6 +53,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             Console.WriteLine("a entrenar se ha dicho");
             List<double[]> inputsList = new List<double[]>();
             List<int> outputsList = new List<int>();
+            _originputsList =  new List<double[]>();
             _originalInputsList = new List<Tuple<double[], int>>();
             foreach (var tag in allsignalsList.Keys)
             {
@@ -64,10 +66,11 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                         EEGEmoProc2ChSettings.Instance.m.Value,
                         EEGEmoProc2ChSettings.Instance.r.Value,
                         EEGEmoProc2ChSettings.Instance.N.Value,
-                        1,
+                        20,
                         0).ToArray();
 
                     inputsList.Add(featureVector.DeepClone());
+                    _originputsList.Add(featureVector.DeepClone());
                     outputsList.Add(tag.DeepClone().GetHashCode());
                     _originalInputsList.Add(new Tuple<double[], int>(featureVector.DeepClone(), tag.DeepClone().GetHashCode()));
                     //Console.WriteLine(_originalInputsList[i].Item1+","+ _originalInputsList[i].Item2);
@@ -233,7 +236,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                     {
                         sumError += stars[jStar].error;
                     }
-                    if((best.error/sumError) < _xrand.NextDouble() * 0.1)
+                    if((best.error/sumError) < _xrand.NextDouble() * 0.05)
                     {
                         Console.WriteLine("Se alcanzó el horizonte de eventos en "+iStar);
                         for (int iInput = 0; iInput < stars[iStar].inputsList.Count; iInput++)
@@ -329,17 +332,19 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
 
             //var model = result.BestModel;
             double gamma = model.Kernel.Gamma;
-            double error = 0;
-            foreach (var input in _originalInputsList)
+
+            int[] predicted = model.Decide(_originputsList.ToArray());
+            double error = new HammingLoss(outputsList.ToArray()).Loss(predicted);
+            /*foreach (var input in _originalInputsList)
             {
                 if (!model.Decide(input.Item1).Equals(input.Item2))
                 {
                     error++;
                 }
             }
-            error = error / _originalInputsList.Count;
+            error = error / (double)_originalInputsList.Count;*/
 
-            return new Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double>(model, error, gamma, 0);
+            return new Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double>(model, error, 0, gamma);
         }
 
         private Tuple<MulticlassSupportVectorMachine<Gaussian>, double, double, double> TrainingPaper(List<double[]> inputsList, List<int> outputsList)
@@ -585,14 +590,14 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             {
                 if (first)
                 {
-                    //f3[i] = BetaBandpass(signalsList[i][0], true);
-                    f3[i] = signalsList[i][0];
+                    f3[i] = BetaBandpass(signalsList[i][0], true);
+                    //f3[i] = signalsList[i][0];
                     first = false;
                 }
                 else
                 {
-                    //f3[i] = BetaBandpass(signalsList[i][0], false);
-                    f3[i] = signalsList[i][0];
+                    f3[i] = BetaBandpass(signalsList[i][0], false);
+                    //f3[i] = signalsList[i][0];
                 }
             }
             
@@ -665,11 +670,11 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
         {
             if (newFilters || ReferenceEquals(null, _lowFilter) || ReferenceEquals(null, _highFilter))
             {
-                _lowFilter = new FilterButterworth(45.0f,
+                _lowFilter = new FilterButterworth(4.0f,
                     EEGEmoProc2ChSettings.Instance.SamplingHz,
                     FilterButterworth.PassType.Lowpass, 0.1f);
 
-                _highFilter = new FilterButterworth(4.0f,
+                _highFilter = new FilterButterworth(45.0f,
                     EEGEmoProc2ChSettings.Instance.SamplingHz,
                     FilterButterworth.PassType.Highpass, 0.1f);
             }
