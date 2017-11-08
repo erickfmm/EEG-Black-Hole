@@ -12,6 +12,7 @@
   "MinError": 0,
   "MaxParalelism": 6,
   "OnlyPaper": false,
+  "RandomInitialFeatures": true,
   "LALVFileName": "SegYo-LALV.db",
   "LAHVFileName": "SegYo-LAHV.db",
   "HALVFileName": "SegYo-HALV.db",

@@ -78,11 +78,39 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
                 }
             }
             Console.WriteLine("procesado todo, ahora a buscar");
+            
+            bool randomInitial = EEGEmoProc2ChSettings.Instance.RandomInitialFeatures.Value;
+            if (randomInitial)
+            {
+                double minInput = double.PositiveInfinity;
+                double maxInput = double.NegativeInfinity;
+                for (int iInput = 0; iInput < inputsList.Count; iInput++)
+                {
+                    for (int jInput = 0; jInput < inputsList[iInput].Length; jInput++)
+                    {
+                        if (minInput > inputsList[iInput][jInput])
+                        {
+                            minInput = inputsList[iInput][jInput];
+                        }
+                        if (maxInput < inputsList[iInput][jInput])
+                        {
+                            maxInput = inputsList[iInput][jInput];
+                        }
+                    }
+                }
+                for (int iInput = 0; iInput < inputsList.Count; iInput++)
+                {
+                    for (int jInput = 0; jInput < inputsList[iInput].Length; jInput++)
+                    {
+                        inputsList[iInput][jInput] = _xrand.NextDouble() * (maxInput - minInput + 1) + minInput;
+                    }
+                }
+            }
             bool onlyPaper = EEGEmoProc2ChSettings.Instance.OnlyPaper.Value;
             if (onlyPaper)
             {
                 var res = TrainingPaper(inputsList, outputsList);
-                WriteFiles(res.Item2, res.Item4, res.Item3, inputsList, outputsList, res.Item1);
+                WriteFiles(res.Item2, res.Item4, res.Item3, _originputsList, outputsList, res.Item1);
                 return res.Item1;
             }
             // Instantiate a new Grid Search algorithm for Kernel Support Vector Machines
@@ -254,7 +282,7 @@ namespace cl.uv.leikelen.Module.Processing.EEGEmotion2Channels
             }
             fileBestByIt.Close();
             file_all_stars.Close();
-            WriteFiles(best.error, best.Gamma, best.Complexity, inputsList, outputsList, best.svm);
+            WriteFiles(best.error, best.Gamma, best.Complexity, _originputsList, outputsList, best.svm);
             return svm;
         }
 
